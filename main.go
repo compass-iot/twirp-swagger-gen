@@ -45,6 +45,12 @@ func (sw *SwaggerWriter) Package(pkg *proto.Package) {
 		panic("version not set")
 	}
 
+	label, found := os.LookupEnv("LABEL")
+	if !found {
+		//v = "version not set"
+		panic("label not set")
+	}
+
 	sw.Swagger.Swagger = "2.0"
 	sw.Schemes = []string{"https"}
 	sw.Produces = []string{"application/json"}
@@ -68,7 +74,7 @@ func (sw *SwaggerWriter) Package(pkg *proto.Package) {
 	}
 	overview := string(b)
 	mkUrl := func(filename string) string {
-		return fmt.Sprintf("https://storage.googleapis.com/compass-public-docs/%s/%s", v, filename)
+		return fmt.Sprintf("https://storage.googleapis.com/compass-public-docs/%s/%s/%s", label, v, filename)
 	}
 
 	type Urls struct {
