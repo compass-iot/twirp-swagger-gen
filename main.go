@@ -68,9 +68,9 @@ func (sw *SwaggerWriter) Package(pkg *proto.Package) {
 
 	ext := make(spec.Extensions)
 	ext.Add("x-logo", xlogo)
-	b, err := ioutil.ReadFile("overview.html")
+	b, err := ioutil.ReadFile("static/" + label + ".html")
 	if err != nil {
-		panic(err)
+		b = []byte("")
 	}
 	overview := string(b)
 	mkUrl := func(filename string) string {
@@ -139,7 +139,7 @@ func (sw *SwaggerWriter) Import(i *proto.Import) {
 	}
 
 	// additional files walked for messages and imports only
-	proto.Walk(definition, proto.WithPackage(withPackage), proto.WithImport(sw.Import), proto.WithMessage(sw.Message))
+	proto.Walk(definition, proto.WithPackage(withPackage), proto.WithImport(sw.Import), proto.WithMessage(sw.Message), proto.WithEnum(sw.Enum))
 
 	sw.packageName = oldPackageName
 }
@@ -306,6 +306,7 @@ func (sw *SwaggerWriter) Message(msg *proto.Message) {
 		"number",
 		"object",
 		"string",
+		"bytes",
 	}
 
 	find := func(haystack []string, needle string) (int, bool) {
@@ -318,6 +319,7 @@ func (sw *SwaggerWriter) Message(msg *proto.Message) {
 	}
 
 	for i, element := range msg.Elements {
+
 		switch val := element.(type) {
 		case *proto.NormalField:
 			fieldTitle, example := comment(val.Field.Comment)
@@ -346,6 +348,10 @@ func (sw *SwaggerWriter) Message(msg *proto.Message) {
 			if fieldType == "google.protobuf.Timestamp" {
 				fieldType = "string"
 				fieldDescription = "[RFC 3339](https://www.ietf.org/rfc/rfc3339.txt)"
+			}
+			if fieldType == "bytes" {
+				fieldType = "string"
+				fieldFormat = "binary"
 			}
 
 			ext := make(spec.Extensions)
