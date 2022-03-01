@@ -57,12 +57,29 @@ func (sw *SwaggerWriter) Package(pkg *proto.Package) {
 	sw.Host = sw.hostname
 	sw.Consumes = sw.Produces
 
+	oauth := make(map[string][]string)
+	oauth["oauth"] = []string{}
+	sw.Security = make([]map[string][]string, 0)
+	sw.Security = append(sw.Security, oauth)
+
+	secDef := make(spec.SecurityDefinitions)
+	secDef["oauth"] = &spec.SecurityScheme{
+		SecuritySchemeProps: spec.SecuritySchemeProps{
+			Description: "Please use [client credentials](https://datatracker.ietf.org/doc/html/rfc6749#section-4.4) given to you by Compass IOT, please only use [basic auth](https://en.wikipedia.org/wiki/Basic_access_authentication) via the 'Authorization' header to obtain access tokens",
+			Type:        "oauth2",
+			Flow:        "application",
+			TokenURL:    "https://api.compassiot.cloud/auth",
+			Scopes:      make(map[string]string),
+		},
+	}
+	sw.SecurityDefinitions = secDef
+
 	xlogo := struct {
-		Url string `json:"url,omitempty"`
+		Url             string `json:"url,omitempty"`
 		BackgroundColor string `json:"backgroundColor,omitempty"`
-		AltText string `json:"altText,omitempty"`
+		AltText         string `json:"altText,omitempty"`
 	}{
-		Url: "https://storage.googleapis.com/compass-public-docs/compass_logo.png",
+		Url:     "https://storage.googleapis.com/compass-public-docs/compass_logo.png",
 		AltText: "Compassiot logo",
 	}
 
@@ -77,30 +94,36 @@ func (sw *SwaggerWriter) Package(pkg *proto.Package) {
 		return fmt.Sprintf("https://storage.googleapis.com/compass-public-docs/%s/%s/%s", label, v, filename)
 	}
 
-	type Urls struct {
-		SurveyTS string
-		TwirpTS string
-		SurveyPB2PY string
-		TwirpPY string
+	swaggerFileNames, found := os.LookupEnv("SWAGGER_FILES")
+	if !found {
+		//v = "version not set"
+		panic("SWAGGER_FILES not set")
+	}
+	urls := make(map[string]string)
+	files := strings.Split(swaggerFileNames, ",")
+	for _, f := range files {
+		key := strings.ReplaceAll(f, ".", "")
+		key = strings.ReplaceAll(key, "_", "")
+		key = strings.ReplaceAll(key, "-", "")
+		key = strings.TrimSpace(key)
+		urls[key] = mkUrl(f)
 	}
 
-	urls := Urls{
-		mkUrl("survey.ts"),
-		mkUrl("twirp.ts"),
-		mkUrl("survey_pb2.py"),
-		mkUrl("survey_twirp.py"),
-	}
 	tmpl, err := template.New("overview").Parse(overview)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 	buf := new(bytes.Buffer)
 
 	err = tmpl.Execute(buf, urls)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
 
 	sw.Info = &spec.Info{
 		InfoProps: spec.InfoProps{
-			Title:   path.Base(sw.filename),
-			Version: v,
+			Title:       path.Base(sw.filename),
+			Version:     v,
 			Description: buf.String(),
 		},
 		VendorExtensible: spec.VendorExtensible{
@@ -207,8 +230,8 @@ func (sw *SwaggerWriter) Service(srv *proto.Service) {
 		//}
 		summary := description(srv.Comment)
 		tag := spec.Tag{
-			TagProps:         spec.TagProps{
-				Name: srv.Name,
+			TagProps: spec.TagProps{
+				Name:        srv.Name,
 				Description: summary,
 			},
 		}
@@ -222,7 +245,8 @@ func (sw *SwaggerWriter) RPC(rpc *proto.RPC) {
 		panic("parent is not proto.service")
 	}
 
-	pathName := fmt.Sprintf("/twirp/%s.%s/%s", sw.packageName, parent.Name, rpc.Name)
+	base := strings.ReplaceAll(strings.ToLower(parent.Name), "service", "")
+	pathName := fmt.Sprintf("/%s/%s.%s/%s", base, sw.packageName, parent.Name, rpc.Name)
 
 	summary := description(rpc.Comment)
 	sw.Swagger.Paths.Paths[pathName] = spec.PathItem{
@@ -288,8 +312,8 @@ func (sw *SwaggerWriter) Enum(msg *proto.Enum) {
 			Title:       title,
 			Description: description(msg.Comment),
 			//Type:        spec.StringOrArray([]string{"string", "integer"}),
-			Type:        spec.StringOrArray([]string{"string"}),
-			Enum:  values,
+			Type: spec.StringOrArray([]string{"string"}),
+			Enum: values,
 		},
 	}
 	sw.Swagger.Definitions[definitionName] = fieldSchema
