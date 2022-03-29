@@ -1,14 +1,16 @@
 package swagger
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
+	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/apex/log"
 	"github.com/emicklei/proto"
@@ -39,21 +41,102 @@ func NewWriter(filename, hostname, pathPrefix string) *Writer {
 }
 
 func (sw *Writer) Package(pkg *proto.Package) {
+	v, found := os.LookupEnv("VERSION")
+	if !found {
+		//v = "version not set"
+		panic("version not set")
+	}
+
+	label, found := os.LookupEnv("LABEL")
+	if !found {
+		//v = "version not set"
+		panic("label not set")
+	}
+
 	sw.Swagger.Swagger = "2.0"
-	sw.Schemes = []string{"http", "https"}
+	sw.Schemes = []string{"https"}
 	sw.Produces = []string{"application/json"}
 	sw.Host = sw.hostname
 	sw.Consumes = sw.Produces
+
+	oauth := make(map[string][]string)
+	oauth["oauth"] = []string{}
+	sw.Security = make([]map[string][]string, 0)
+	sw.Security = append(sw.Security, oauth)
+
+	secDef := make(spec.SecurityDefinitions)
+	secDef["oauth"] = &spec.SecurityScheme{
+		SecuritySchemeProps: spec.SecuritySchemeProps{
+			Description: "Please use [client credentials](https://datatracker.ietf.org/doc/html/rfc6749#section-4.4) given to you by Compass IOT, please only use [basic auth](https://en.wikipedia.org/wiki/Basic_access_authentication) via the 'Authorization' header to obtain access tokens",
+			Type:        "oauth2",
+			Flow:        "application",
+			TokenURL:    "https://api.compassiot.cloud/auth",
+			Scopes:      make(map[string]string),
+		},
+	}
+	sw.SecurityDefinitions = secDef
+
+	xlogo := struct {
+		Url             string `json:"url,omitempty"`
+		BackgroundColor string `json:"backgroundColor,omitempty"`
+		AltText         string `json:"altText,omitempty"`
+	}{
+		Url:     "https://storage.googleapis.com/compass-public-docs/compass_logo.png",
+		AltText: "Compassiot logo",
+	}
+
+	ext := make(spec.Extensions)
+	ext.Add("x-logo", xlogo)
+	b, err := ioutil.ReadFile("static/" + label + ".html")
+	if err != nil {
+		b = []byte("")
+	}
+	overview := string(b)
+	mkUrl := func(filename string) string {
+		return fmt.Sprintf("https://storage.googleapis.com/compass-public-docs/%s/%s/%s", label, v, filename)
+	}
+
+	swaggerFileNames, found := os.LookupEnv("SWAGGER_FILES")
+	if !found {
+		//v = "version not set"
+		panic("SWAGGER_FILES not set")
+	}
+	urls := make(map[string]string)
+	files := strings.Split(swaggerFileNames, ",")
+	for _, f := range files {
+		key := strings.ReplaceAll(f, ".", "")
+		key = strings.ReplaceAll(key, "_", "")
+		key = strings.ReplaceAll(key, "-", "")
+		key = strings.TrimSpace(key)
+		urls[key] = mkUrl(f)
+	}
+
+	tmpl, err := template.New("overview").Parse(overview)
+	if err != nil {
+		panic(err)
+	}
+	buf := new(bytes.Buffer)
+
+	err = tmpl.Execute(buf, urls)
+	if err != nil {
+		panic(err)
+	}
+
 	sw.Info = &spec.Info{
 		InfoProps: spec.InfoProps{
-			Title:   path.Base(sw.filename),
-			Version: "version not set",
+			Title:       path.Base(sw.filename),
+			Version:     v,
+			Description: buf.String(),
+		},
+		VendorExtensible: spec.VendorExtensible{
+			Extensions: ext,
 		},
 	}
 	sw.Swagger.Definitions = make(spec.Definitions)
 	sw.Swagger.Paths = &spec.Paths{
 		Paths: make(map[string]spec.PathItem),
 	}
+	sw.Tags = make([]spec.Tag, 0)
 
 	sw.packageName = pkg.Name
 }
@@ -87,14 +170,14 @@ func (sw *Writer) Import(i *proto.Import) {
 	}
 
 	// additional files walked for messages and imports only
-	proto.Walk(definition, proto.WithPackage(withPackage), proto.WithImport(sw.Import), proto.WithMessage(sw.Message))
+	proto.Walk(definition, proto.WithPackage(withPackage), proto.WithImport(sw.Import), proto.WithMessage(sw.Message), proto.WithEnum(sw.Enum))
 
 	sw.packageName = oldPackageName
 }
 
-func comment(comment *proto.Comment) string {
+func comment(comment *proto.Comment) (string, interface{}) {
 	if comment == nil {
-		return ""
+		return "", ""
 	}
 
 	result := ""
@@ -106,9 +189,22 @@ func comment(comment *proto.Comment) string {
 		result += " " + line
 	}
 	if len(result) > 1 {
-		return result[1:]
+		x := strings.Split(result[1:], ";")
+		if len(x) > 1 {
+			example := strings.TrimSpace(x[1])
+			n, err := strconv.Atoi(example)
+			if err == nil {
+				return x[0], n
+			}
+			f, err := strconv.ParseFloat(example, 64)
+			if err == nil {
+				return x[0], f
+			}
+			return x[0], example
+		}
+		return x[0], ""
 	}
-	return ""
+	return "", ""
 }
 
 func description(comment *proto.Comment) string {
@@ -116,21 +212,14 @@ func description(comment *proto.Comment) string {
 		return ""
 	}
 
-	grab := false
-
 	result := []string{}
 	for _, line := range comment.Lines {
 		line = strings.TrimSpace(line)
-		if line == "" {
-			if grab {
-				break
-			}
-			grab = true
-			continue
+		if strings.Contains(line, ";") {
+			x := strings.Split(line, ";")
+			line = x[0]
 		}
-		if grab {
-			result = append(result, line)
-		}
+		result = append(result, line)
 	}
 	return strings.Join(result, "\n")
 }
@@ -141,16 +230,18 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 		panic("parent is not proto.service")
 	}
 
-	pathName := filepath.Join("/"+sw.pathPrefix+"/", sw.packageName+"."+parent.Name, rpc.Name)
-	// pathName := fmt.Sprintf("/twirp/%s.%s/%s", sw.packageName, parent.Name, rpc.Name)
+	//pathName := filepath.Join("/"+sw.pathPrefix+"/", sw.packageName+"."+parent.Name, rpc.Name)
+	base := strings.ReplaceAll(strings.ToLower(parent.Name), "service", "")
+	pathName := fmt.Sprintf("/%s/%s.%s/%s", base, sw.packageName, parent.Name, rpc.Name)
 
+	summary := description(rpc.Comment)
 	sw.Swagger.Paths.Paths[pathName] = spec.PathItem{
 		PathItemProps: spec.PathItemProps{
 			Post: &spec.Operation{
 				OperationProps: spec.OperationProps{
 					ID:      rpc.Name,
 					Tags:    []string{parent.Name},
-					Summary: comment(rpc.Comment),
+					Summary: summary,
 					Responses: &spec.Responses{
 						ResponsesProps: spec.ResponsesProps{
 							StatusCodeResponses: map[int]spec.Response{
@@ -159,7 +250,7 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 										Description: "A successful response.",
 										Schema: &spec.Schema{
 											SchemaProps: spec.SchemaProps{
-												Ref: spec.MustCreateRef(fmt.Sprintf("#/definitions/%s_%s", sw.packageName, rpc.ReturnsType)),
+												Ref: spec.MustCreateRef(fmt.Sprintf("#/definitions/%s.%s", sw.packageName, rpc.ReturnsType)),
 											},
 										},
 									},
@@ -175,7 +266,7 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 								Required: true,
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
-										Ref: spec.MustCreateRef(fmt.Sprintf("#/definitions/%s_%s", sw.packageName, rpc.RequestType)),
+										Ref: spec.MustCreateRef(fmt.Sprintf("#/definitions/%s.%s", sw.packageName, rpc.RequestType)),
 									},
 								},
 							},
@@ -188,7 +279,7 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 }
 
 func (sw *Writer) Message(msg *proto.Message) {
-	definitionName := fmt.Sprintf("%s_%s", sw.packageName, msg.Name)
+	definitionName := fmt.Sprintf("%s.%s", sw.packageName, msg.Name)
 
 	schemaProps := make(map[string]spec.Schema)
 
@@ -198,6 +289,7 @@ func (sw *Writer) Message(msg *proto.Message) {
 		"number",
 		"object",
 		"string",
+		"bytes",
 	}
 
 	find := func(haystack []string, needle string) (int, bool) {
@@ -226,9 +318,9 @@ func (sw *Writer) Message(msg *proto.Message) {
 		}
 	}
 
-	addField := func(field *proto.Field, repeated bool) {
+	addField := func(field *proto.Field, repeated bool, order int) {
+		fieldTitle, example := comment(field.Comment)
 		var (
-			fieldTitle       = comment(field.Comment)
 			fieldDescription = description(field.Comment)
 			fieldName        = field.Name
 			fieldType        = field.Type
@@ -245,6 +337,9 @@ func (sw *Writer) Message(msg *proto.Message) {
 		}
 
 		fieldOrder = append(fieldOrder, fieldName)
+
+		ext := make(spec.Extensions)
+		ext.Add("x-order", strconv.Itoa(order))
 
 		if _, ok := find(allowedValues, fieldType); ok {
 			fieldSchema := spec.Schema{
@@ -269,6 +364,12 @@ func (sw *Writer) Message(msg *proto.Message) {
 							Schema: &fieldSchema,
 						},
 					},
+					VendorExtensible: spec.VendorExtensible{
+						Extensions: ext,
+					},
+				}
+				if example != "" {
+					fieldSchema.WithExample(example)
 				}
 			} else {
 				schemaProps[fieldName] = fieldSchema
@@ -278,12 +379,12 @@ func (sw *Writer) Message(msg *proto.Message) {
 
 		// Prefix rich type with package name
 		if !strings.Contains(fieldType, ".") {
-			fieldType = sw.packageName + "_" + fieldType
+			fieldType = sw.packageName + "." + fieldType
 		}
 		ref := fmt.Sprintf("#/definitions/%s", fieldType)
 
 		if repeated {
-			schemaProps[fieldName] = spec.Schema{
+			fieldSchema := spec.Schema{
 				SchemaProps: spec.SchemaProps{
 					Title:       fieldTitle,
 					Description: fieldDescription,
@@ -296,29 +397,43 @@ func (sw *Writer) Message(msg *proto.Message) {
 						},
 					},
 				},
+				VendorExtensible: spec.VendorExtensible{
+					Extensions: ext,
+				},
 			}
+			if example != "" {
+				fieldSchema.WithExample(example)
+			}
+			schemaProps[fieldName] = fieldSchema
 			return
 		}
-		schemaProps[fieldName] = spec.Schema{
+		fieldSchema := spec.Schema{
 			SchemaProps: spec.SchemaProps{
 				Title:       fieldTitle,
 				Description: fieldDescription,
 				Ref:         spec.MustCreateRef(ref),
 			},
+			VendorExtensible: spec.VendorExtensible{
+				Extensions: ext,
+			},
 		}
+		if example != "" {
+			fieldSchema.WithExample(example)
+		}
+		schemaProps[fieldName] = fieldSchema
 	}
 
-	for _, element := range allFields {
+	for i, element := range allFields {
 		switch val := element.(type) {
 		case *proto.Comment:
 		case *proto.Oneof:
 			// Nothing.
 		case *proto.OneOfField:
-			addField(val.Field, false)
+			addField(val.Field, false, i)
 		case *proto.MapField:
-			addField(val.Field, false)
+			addField(val.Field, false, i)
 		case *proto.NormalField:
-			addField(val.Field, val.Repeated)
+			addField(val.Field, val.Repeated, i)
 		default:
 			log.Infof("Unknown field type: %T", element)
 		}
@@ -331,13 +446,63 @@ func (sw *Writer) Message(msg *proto.Message) {
 		schemaDesc = schemaDesc + "\n\nFields: " + strings.Join(fieldOrder, ", ")
 	}
 
+	title, _ := comment(msg.Comment)
 	sw.Swagger.Definitions[definitionName] = spec.Schema{
 		SchemaProps: spec.SchemaProps{
-			Title:       comment(msg.Comment),
+			Title:       title,
 			Description: strings.TrimSpace(schemaDesc),
 			Type:        spec.StringOrArray([]string{"object"}),
 			Properties:  schemaProps,
 		},
+	}
+}
+
+func (sw *Writer) Enum(msg *proto.Enum) {
+	definitionName := fmt.Sprintf("%s.%s", sw.packageName, msg.Name)
+
+	values := make([]interface{}, 0)
+
+	for _, element := range msg.Elements {
+		switch val := element.(type) {
+		case *proto.EnumField:
+			values = append(values, val.Name)
+		default:
+			log.Infof("Unknown field type: %T", element)
+		}
+	}
+
+	title, _ := comment(msg.Comment)
+	fieldSchema := spec.Schema{
+		SchemaProps: spec.SchemaProps{
+			Title:       title,
+			Description: description(msg.Comment),
+			Type:        spec.StringOrArray([]string{"string"}),
+			Enum:        values,
+		},
+	}
+	sw.Swagger.Definitions[definitionName] = fieldSchema
+}
+
+func (sw *Writer) Service(srv *proto.Service) {
+	exists := false
+	for _, tag := range sw.Tags {
+		if tag.Name == srv.Name {
+			exists = true
+		}
+	}
+	if !exists {
+		//summary := ""
+		//if srv.Comment != nil {
+		//	summary = strings.Join(srv.Comment.Lines, "\n")
+		//}
+		summary := description(srv.Comment)
+		tag := spec.Tag{
+			TagProps: spec.TagProps{
+				Name:        srv.Name,
+				Description: summary,
+			},
+		}
+		sw.Tags = append(sw.Tags, tag)
 	}
 }
 
@@ -346,6 +511,8 @@ func (sw *Writer) Handlers() []proto.Handler {
 		proto.WithPackage(sw.Package),
 		proto.WithRPC(sw.RPC),
 		proto.WithMessage(sw.Message),
+		proto.WithEnum(sw.Enum),
+		proto.WithService(sw.Service),
 		proto.WithImport(sw.Import),
 	}
 }
