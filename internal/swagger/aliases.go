@@ -3,6 +3,7 @@ package swagger
 var typeAliases = map[string]struct {
 	Type, Format string
 }{
+	"string": {Type: "string", Format: "string"},
 	// proto numeric types
 	"int32":    {Type: "integer", Format: "int32"},
 	"uint32":   {Type: "integer", Format: "uint32"},
