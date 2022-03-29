@@ -318,7 +318,8 @@ func (sw *Writer) Message(msg *proto.Message) {
 		}
 	}
 
-	addField := func(field *proto.Field, repeated bool, order int) {
+	addField := func(field *proto.Field, mapKeyType string, repeated bool, order int) {
+		var additionalProps *spec.SchemaOrBool
 		fieldTitle, example := comment(field.Comment)
 		var (
 			fieldDescription = description(field.Comment)
@@ -336,6 +337,25 @@ func (sw *Writer) Message(msg *proto.Message) {
 			fieldFormat = ""
 		}
 
+		if mapKeyType != "" {
+			p, ok := typeAliases[mapKeyType]
+			if ok {
+				// doesn't handle map<string, Message> only map<string, primitive>
+				additionalProps = &spec.SchemaOrBool{
+					Allows: false,
+					Schema: &spec.Schema{
+						VendorExtensible: spec.VendorExtensible{},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{p.Type},
+						},
+						SwaggerSchemaProps: spec.SwaggerSchemaProps{},
+					},
+				}
+				fieldType = "object"
+				fieldFormat = ""
+			}
+		}
+
 		fieldOrder = append(fieldOrder, fieldName)
 
 		ext := make(spec.Extensions)
@@ -344,10 +364,11 @@ func (sw *Writer) Message(msg *proto.Message) {
 		if _, ok := find(allowedValues, fieldType); ok {
 			fieldSchema := spec.Schema{
 				SchemaProps: spec.SchemaProps{
-					Title:       fieldTitle,
-					Description: fieldDescription,
-					Type:        spec.StringOrArray([]string{fieldType}),
-					Format:      fieldFormat,
+					Title:                fieldTitle,
+					Description:          fieldDescription,
+					Type:                 spec.StringOrArray([]string{fieldType}),
+					Format:               fieldFormat,
+					AdditionalProperties: additionalProps,
 				},
 			}
 			if repeated {
@@ -429,11 +450,11 @@ func (sw *Writer) Message(msg *proto.Message) {
 		case *proto.Oneof:
 			// Nothing.
 		case *proto.OneOfField:
-			addField(val.Field, false, i)
+			addField(val.Field, "", false, i)
 		case *proto.MapField:
-			addField(val.Field, false, i)
+			addField(val.Field, val.KeyType, false, i)
 		case *proto.NormalField:
-			addField(val.Field, val.Repeated, i)
+			addField(val.Field, "", val.Repeated, i)
 		default:
 			log.Infof("Unknown field type: %T", element)
 		}
