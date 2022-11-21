@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/template"
@@ -549,7 +550,7 @@ func (sw *Writer) Get() []byte {
 }
 
 func (sw *Writer) WalkFile() error {
-	definition, err := loadProtoFile(sw.filename)
+	definition, err := loadProtoFile(filepath.Join("/v2.compass.iot/compassapis", sw.filename))
 	if err != nil {
 		return err
 	}
