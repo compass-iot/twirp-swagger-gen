@@ -498,8 +498,7 @@ func (sw *Writer) Get() []byte {
 }
 
 func (sw *Writer) WalkFile() error {
-	// definition, err := loadProtoFile(filepath.Join(sw.protoDir, sw.filename))
-	definition, err := loadProtoFile(filepath.Join("/v2.compass.iot/compassapis", sw.filename))
+	definition, err := loadProtoFile(filepath.Join(sw.protoDir, sw.filename))
 	if err != nil {
 		return err
 	}
