@@ -54,6 +54,9 @@ func main() {
 			}
 
 			// Check required args
+			if err := errorIfEmpty("hostname", hostname); err != nil {
+				return err
+			}
 			if err := errorIfEmpty("version", version); err != nil {
 				return err
 			}
