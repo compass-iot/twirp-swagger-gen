@@ -32,15 +32,16 @@ func main() {
 	hostname := flags.String("hostname", "example.com", "")
 	pathPrefix := flags.String("path_prefix", "/twirp", "")
 	outputSuffix := flags.String("output_suffix", ".swagger.json", "")
-	opts := protogen.Options{
-		ParamFunc: flags.Set,
-	}
 
 	// Extra args for Compass IoT
 	version := flags.String("version", "", "")
 	sdkfiles := flags.String("sdk_files", "", "")
 	protoDir := flags.String("proto_dir", "", "")
 	templateDir := flags.String("template_dir", "", "")
+
+	opts := protogen.Options{
+		ParamFunc: flags.Set,
+	}
 
 	opts.Run(func(gen *protogen.Plugin) error {
 		for _, f := range gen.Files {
