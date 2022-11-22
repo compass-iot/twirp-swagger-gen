@@ -39,7 +39,7 @@ func main() {
 	protoDir := flags.String("proto_dir", "", "")
 	templateDir := flags.String("template_dir", "", "")
 
-	opts := protogen.Options{
+	opts := &protogen.Options{
 		ParamFunc: flags.Set,
 	}
 
