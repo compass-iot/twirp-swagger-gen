@@ -29,7 +29,7 @@ func errorIfEmpty(key string, value *string) error {
 
 func main() {
 	var flags flag.FlagSet
-	hostname := flags.String("hostname", "example.com", "")
+	hostname := flags.String("hostname", "", "")
 	pathPrefix := flags.String("path_prefix", "/twirp", "")
 	outputSuffix := flags.String("output_suffix", ".swagger.json", "")
 
