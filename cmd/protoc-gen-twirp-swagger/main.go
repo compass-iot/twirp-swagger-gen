@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 
 	"github.com/apex/log"
 	"github.com/davecgh/go-spew/spew"
@@ -16,6 +17,16 @@ func init() {
 	log.SetLevel(log.InfoLevel)
 }
 
+func errorIfEmpty(key string, value *string) error {
+	if value == nil {
+		return fmt.Errorf("%s is nil", key)
+	}
+	if *value == "" {
+		return fmt.Errorf("%s is empty", key)
+	}
+	return nil
+}
+
 func main() {
 	var flags flag.FlagSet
 	hostname := flags.String("hostname", "example.com", "")
@@ -24,6 +35,13 @@ func main() {
 	opts := protogen.Options{
 		ParamFunc: flags.Set,
 	}
+
+	// Extra args for Compass IoT
+	version := flags.String("version", "", "")
+	sdkfiles := flags.String("sdk_files", "", "")
+	protoDir := flags.String("proto_dir", "", "")
+	templateDir := flags.String("template_dir", "", "")
+
 	opts.Run(func(gen *protogen.Plugin) error {
 		for _, f := range gen.Files {
 			in := f.Desc.Path()
@@ -34,7 +52,21 @@ func main() {
 				continue
 			}
 
-			writer := swagger.NewWriter(in, *hostname, *pathPrefix)
+			// Check required args
+			if err := errorIfEmpty("version", version); err != nil {
+				return err
+			}
+			if err := errorIfEmpty("sdk_files", sdkfiles); err != nil {
+				return err
+			}
+			if err := errorIfEmpty("proto_dir", protoDir); err != nil {
+				return err
+			}
+			if err := errorIfEmpty("template_dir", templateDir); err != nil {
+				return err
+			}
+
+			writer := swagger.NewWriter(in, *hostname, *pathPrefix, *version, *sdkfiles, *protoDir, *templateDir)
 			if err := writer.WalkFile(); err != nil {
 				if errors.Is(err, swagger.ErrNoServiceDefinition) {
 					log.Debugf("skip writing file, %s: %q", err, in)

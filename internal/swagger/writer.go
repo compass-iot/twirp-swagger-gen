@@ -1,17 +1,14 @@
 package swagger
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/apex/log"
 	"github.com/emicklei/proto"
@@ -27,33 +24,30 @@ type Writer struct {
 	hostname    string
 	pathPrefix  string
 	packageName string
+
+	version     string
+	sdkfiles    []string
+	protoDir    string // "hack" to get around import resolution issues in proto
+	templateDir string
 }
 
-func NewWriter(filename, hostname, pathPrefix string) *Writer {
+func NewWriter(filename, hostname, pathPrefix, version, sdkfiles, protoDir, templateDir string) *Writer {
 	if pathPrefix == "" {
 		pathPrefix = "/twirp"
 	}
 	return &Writer{
-		filename:   filename,
-		hostname:   hostname,
-		pathPrefix: pathPrefix,
-		Swagger:    &spec.Swagger{},
+		filename:    filename,
+		hostname:    hostname,
+		pathPrefix:  pathPrefix,
+		version:     version,
+		sdkfiles:    strings.Split(sdkfiles, ","),
+		protoDir:    protoDir,
+		templateDir: templateDir,
+		Swagger:     &spec.Swagger{},
 	}
 }
 
 func (sw *Writer) Package(pkg *proto.Package) {
-	v, found := os.LookupEnv("VERSION")
-	if !found {
-		//v = "version not set"
-		panic("version not set")
-	}
-
-	label, found := os.LookupEnv("LABEL")
-	if !found {
-		//v = "version not set"
-		panic("label not set")
-	}
-
 	sw.Swagger.Swagger = "2.0"
 	sw.Schemes = []string{"https"}
 	sw.Produces = []string{"application/json"}
@@ -71,66 +65,20 @@ func (sw *Writer) Package(pkg *proto.Package) {
 			Description: "Please use [client credentials](https://datatracker.ietf.org/doc/html/rfc6749#section-4.4) given to you by Compass IOT, please only use [basic auth](https://en.wikipedia.org/wiki/Basic_access_authentication) via the 'Authorization' header to obtain access tokens",
 			Type:        "oauth2",
 			Flow:        "application",
-			TokenURL:    "https://api.compassiot.cloud/auth",
+			TokenURL:    path.Join(sw.hostname, "auth"), // final form should be https://api.compassiot.cloud/auth
 			Scopes:      make(map[string]string),
 		},
 	}
 	sw.SecurityDefinitions = secDef
 
-	xlogo := struct {
-		Url             string `json:"url,omitempty"`
-		BackgroundColor string `json:"backgroundColor,omitempty"`
-		AltText         string `json:"altText,omitempty"`
-	}{
-		Url:     "https://storage.googleapis.com/compass-public-docs/compass_logo.png",
-		AltText: "Compassiot logo",
-	}
-
-	ext := make(spec.Extensions)
-	ext.Add("x-logo", xlogo)
-	b, err := ioutil.ReadFile("static/" + label + ".html")
-	if err != nil {
-		b = []byte("")
-	}
-	overview := string(b)
-	mkUrl := func(filename string) string {
-		return fmt.Sprintf("https://storage.googleapis.com/compass-public-docs/%s/%s/%s", label, v, filename)
-	}
-
-	swaggerFileNames, found := os.LookupEnv("SWAGGER_FILES")
-	if !found {
-		//v = "version not set"
-		panic("SWAGGER_FILES not set")
-	}
-	urls := make(map[string]string)
-	files := strings.Split(swaggerFileNames, ",")
-	for _, f := range files {
-		key := strings.ReplaceAll(f, ".", "")
-		key = strings.ReplaceAll(key, "_", "")
-		key = strings.ReplaceAll(key, "-", "")
-		key = strings.TrimSpace(key)
-		urls[key] = mkUrl(f)
-	}
-
-	tmpl, err := template.New("overview").Parse(overview)
-	if err != nil {
-		panic(err)
-	}
-	buf := new(bytes.Buffer)
-
-	err = tmpl.Execute(buf, urls)
-	if err != nil {
-		panic(err)
-	}
-
 	sw.Info = &spec.Info{
 		InfoProps: spec.InfoProps{
-			Title:       path.Base(sw.filename),
-			Version:     v,
-			Description: buf.String(),
+			Title:       filepath.Base(sw.filename), // anything to do with files, use filepath
+			Version:     sw.version,
+			Description: sw.MakeDescription(),
 		},
 		VendorExtensible: spec.VendorExtensible{
-			Extensions: ext,
+			Extensions: sw.MakeLogo(),
 		},
 	}
 	sw.Swagger.Definitions = make(spec.Definitions)
@@ -246,7 +194,7 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 					Responses: &spec.Responses{
 						ResponsesProps: spec.ResponsesProps{
 							StatusCodeResponses: map[int]spec.Response{
-								200: spec.Response{
+								200: {
 									ResponseProps: spec.ResponseProps{
 										Description: "A successful response.",
 										Schema: &spec.Schema{
@@ -260,7 +208,7 @@ func (sw *Writer) RPC(rpc *proto.RPC) {
 						},
 					},
 					Parameters: []spec.Parameter{
-						spec.Parameter{
+						{
 							ParamProps: spec.ParamProps{
 								Name:     "body",
 								In:       "body",
@@ -541,7 +489,7 @@ func (sw *Writer) Handlers() []proto.Handler {
 
 func (sw *Writer) Save(filename string) error {
 	body := sw.Get()
-	return ioutil.WriteFile(filename, body, os.ModePerm^0111)
+	return os.WriteFile(filename, body, os.ModePerm^0111)
 }
 
 func (sw *Writer) Get() []byte {
@@ -550,7 +498,7 @@ func (sw *Writer) Get() []byte {
 }
 
 func (sw *Writer) WalkFile() error {
-	definition, err := loadProtoFile(filepath.Join("/v2.compass.iot/compassapis", sw.filename))
+	definition, err := loadProtoFile(filepath.Join(sw.protoDir, sw.filename))
 	if err != nil {
 		return err
 	}
