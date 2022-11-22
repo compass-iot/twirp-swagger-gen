@@ -104,6 +104,11 @@ func (sw *Writer) Import(i *proto.Import) {
 		return
 	}
 
+	// wrapper types are defined in aliases.go
+	if strings.Contains(i.Filename, "google/protobuf/wrappers.proto") {
+		return
+	}
+
 	log.Debugf("importing %s", i.Filename)
 
 	definition, err := sw.loadProtoFile(i.Filename)
