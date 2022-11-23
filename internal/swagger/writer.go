@@ -104,11 +104,18 @@ func (sw *Writer) Import(i *proto.Import) {
 		return
 	}
 
-	log.Debugf("importing %s", i.Filename)
+	var filename string
+	if strings.Contains(i.Filename, "google") {
+		filename = filepath.Join("/usr/local/include", i.Filename)
+	} else {
+		filename = filepath.Join(sw.protoDir, i.Filename)
+	}
 
-	definition, err := loadProtoFile(i.Filename)
+	log.Debugf("importing %s", filename)
+
+	definition, err := loadProtoFile(filename)
 	if err != nil {
-		log.Infof("Can't load %s, err=%s, ignoring (want to make PR?)", i.Filename, err)
+		log.Infof("Can't load %s, err=%s, ignoring (want to make PR?)", filename, err)
 		return
 	}
 
