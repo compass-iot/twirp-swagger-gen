@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +13,8 @@ import (
 	"github.com/emicklei/proto"
 	"github.com/go-openapi/spec"
 )
+
+const WKT_INCLUDE_DIR = "/usr/local/include"
 
 var ErrNoServiceDefinition = errors.New("no service definition found")
 
@@ -40,7 +41,7 @@ func NewWriter(filename, hostname, pathPrefix, version, sdkfiles, protoDir, temp
 		hostname:    hostname,
 		pathPrefix:  pathPrefix,
 		version:     version,
-		sdkfiles:    strings.Split(sdkfiles, ","),
+		sdkfiles:    strings.Split(sdkfiles, "|"),
 		protoDir:    protoDir,
 		templateDir: templateDir,
 		Swagger:     &spec.Swagger{},
@@ -59,13 +60,17 @@ func (sw *Writer) Package(pkg *proto.Package) {
 	sw.Security = make([]map[string][]string, 0)
 	sw.Security = append(sw.Security, oauth)
 
+	tokenUrl := sw.hostname
+	if !strings.HasPrefix(tokenUrl, "https://") {
+		tokenUrl = fmt.Sprintf("https://%s", tokenUrl)
+	}
 	secDef := make(spec.SecurityDefinitions)
 	secDef["oauth"] = &spec.SecurityScheme{
 		SecuritySchemeProps: spec.SecuritySchemeProps{
 			Description: "Please use [client credentials](https://datatracker.ietf.org/doc/html/rfc6749#section-4.4) given to you by Compass IOT, please only use [basic auth](https://en.wikipedia.org/wiki/Basic_access_authentication) via the 'Authorization' header to obtain access tokens",
 			Type:        "oauth2",
 			Flow:        "application",
-			TokenURL:    path.Join(sw.hostname, "auth"), // final form should be https://api.compassiot.cloud/auth
+			TokenURL:    tokenUrl,
 			Scopes:      make(map[string]string),
 		},
 	}
@@ -90,6 +95,17 @@ func (sw *Writer) Package(pkg *proto.Package) {
 	sw.packageName = pkg.Name
 }
 
+// getAbsoluteImportPath resolves the imported path in the file system.
+// If the import path has "google", which means we're importing WKT,
+// it'll join /usr/local/include into the path. Otherwise, it'll join
+// sw.protoDir that we've specified.
+func (sw *Writer) getAbsoluteImportPath(filename string) string {
+	if strings.Contains(filename, "google") {
+		return filepath.Join(WKT_INCLUDE_DIR, filename)
+	}
+	return filepath.Join(sw.protoDir, filename)
+}
+
 func (sw *Writer) Import(i *proto.Import) {
 	// the exclusion here is more about path traversal than it is
 	// about the structure of google proto messages. The annotations
@@ -104,13 +120,7 @@ func (sw *Writer) Import(i *proto.Import) {
 		return
 	}
 
-	var filename string
-	if strings.Contains(i.Filename, "google") {
-		filename = filepath.Join("/usr/local/include", i.Filename)
-	} else {
-		filename = filepath.Join(sw.protoDir, i.Filename)
-	}
-
+	filename := sw.getAbsoluteImportPath(i.Filename)
 	log.Debugf("importing %s", filename)
 
 	definition, err := loadProtoFile(filename)

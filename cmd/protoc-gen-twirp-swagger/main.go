@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"path/filepath"
 
 	"github.com/apex/log"
 	"github.com/davecgh/go-spew/spew"
@@ -38,6 +39,7 @@ func main() {
 	sdkfiles := flags.String("sdk_files", "", "")
 	protoDir := flags.String("proto_dir", "", "")
 	templateDir := flags.String("template_dir", "", "")
+	outDir := flags.String("out_dir", "", "")
 
 	opts := &protogen.Options{
 		ParamFunc: flags.Set,
@@ -79,7 +81,7 @@ func main() {
 				return err
 			}
 
-			out := f.GeneratedFilenamePrefix + *outputSuffix
+			out := *outDir + filepath.Base(f.GeneratedFilenamePrefix) + *outputSuffix
 			g := gen.NewGeneratedFile(out, f.GoImportPath)
 			if _, err := g.Write(writer.Get()); err != nil {
 				return err

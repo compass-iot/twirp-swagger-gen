@@ -1,6 +1,7 @@
 package swagger
 
 import (
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -24,14 +25,15 @@ const (
 // makeGcsUrl is a robust function which concatenates our GCS domain url,
 // provided bucket name and nested file path
 func makeGcsUrl(bucket string, args ...string) string {
-	// Format: ${GCS_DOMAIN}/${bucket}/${args...}
 	merged := []string{}
-	merged = append(merged, GCS_DOMAIN)
 	merged = append(merged, bucket)
 	merged = append(merged, args...)
 
-	// Use `path` lib so we don't have to worry about trailing slashes
-	return path.Join(merged...)
+	// Use `url` lib so we don't have to worry about slashes.
+	// Also it only errors if the first argument does not have a scheme (i.e. http/https).
+	// Since our hardcoded constant has it, I think we can safely ignore the error.
+	str, _ := url.JoinPath(GCS_DOMAIN, merged...)
+	return str
 }
 
 // getLabel generates a filename minus extension
