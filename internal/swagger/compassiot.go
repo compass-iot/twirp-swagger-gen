@@ -88,8 +88,8 @@ func parseTemplate(templateFile string, data interface{}) (string, error) {
 // and the value being their url on GCS
 func (sw *Writer) mapSdkFiles() map[string]string {
 	sdkfilesMap := make(map[string]string)
+	label := getLabel(sw.filename)
 	for _, f := range sw.sdkfiles {
-		label := getLabel(f)
 		key := path.Base(f)                    // get base file name
 		key = strings.ReplaceAll(key, ".", "") // remove dots
 		key = strings.ReplaceAll(key, "_", "") // remove underscores

@@ -60,7 +60,7 @@ func (sw *Writer) Package(pkg *proto.Package) {
 	sw.Security = make([]map[string][]string, 0)
 	sw.Security = append(sw.Security, oauth)
 
-	tokenUrl := sw.hostname
+	tokenUrl := fmt.Sprintf("%s/auth", sw.hostname)
 	if !strings.HasPrefix(tokenUrl, "https://") {
 		tokenUrl = fmt.Sprintf("https://%s", tokenUrl)
 	}
