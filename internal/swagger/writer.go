@@ -106,7 +106,7 @@ func (sw *Writer) Import(i *proto.Import) {
 
 	log.Debugf("importing %s", i.Filename)
 
-	definition, err := sw.loadProtoFile(i.Filename)
+	definition, err := loadProtoFile(i.Filename)
 	if err != nil {
 		log.Infof("Can't load %s, err=%s, ignoring (want to make PR?)", i.Filename, err)
 		return
@@ -498,7 +498,7 @@ func (sw *Writer) Get() []byte {
 }
 
 func (sw *Writer) WalkFile() error {
-	definition, err := sw.loadProtoFile(sw.filename)
+	definition, err := loadProtoFile(filepath.Join(sw.protoDir, sw.filename))
 	if err != nil {
 		return err
 	}
@@ -512,8 +512,8 @@ func (sw *Writer) WalkFile() error {
 	return nil
 }
 
-func (sw *Writer) loadProtoFile(filename string) (*proto.Proto, error) {
-	reader, err := os.Open(filepath.Join(sw.protoDir, filename))
+func loadProtoFile(filename string) (*proto.Proto, error) {
+	reader, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
